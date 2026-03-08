@@ -229,8 +229,6 @@ This project was developed as part of a college mini project to explore the desi
 
 ---
 
-# Author
-
 Tejas M Naidu
 AI / ML Enthusiast
 
