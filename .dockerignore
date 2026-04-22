@@ -1,0 +1,11 @@
+.env
+__pycache__
+*.pyc
+venv/
+.git/
+.gitignore
+voice_samples/
+output.mp3
+output.wav
+*.faiss
+*_chunks.pkl

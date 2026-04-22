@@ -9,8 +9,9 @@ import tempfile
 from datetime import datetime
 import base64
 import json
+import PyPDF2
 
-
+from voice_assistant.rag.vector_store import VectorStore
 from voice_assistant.audio import record_audio, play_audio, stop_audio
 from voice_assistant.transcription import transcribe_audio
 from voice_assistant.response_generation import generate_response
@@ -40,34 +41,6 @@ def start_recording():
         record_audio(Config.INPUT_AUDIO)
     return True
 
-# Function to save API keys to .env file
-def save_api_keys(keys_dict):
-    try:
-        
-        env_path = '.env'
-        env_content = {}
-        
-        if os.path.exists(env_path):
-            with open(env_path, 'r') as f:
-                for line in f:
-                    if '=' in line:
-                        key, value = line.strip().split('=', 1)
-                        env_content[key] = value
-        
-        
-        for key, value in keys_dict.items():
-            if value:  
-                env_content[key] = value
-        
-        
-        with open(env_path, 'w') as f:
-            for key, value in env_content.items():
-                f.write(f"{key}={value}\n")
-        
-        return True
-    except Exception as e:
-        logging.error(f"Error saving API keys: {e}")
-        return False
 
 # Main app function
 def main():
@@ -78,8 +51,7 @@ def main():
     )
     st.markdown("""
         <style>
-        * {
-            font-family: 'Segoe UI', 'Helvetica Neue', sans-serif !important;
+        html, body, .stApp {
             color: #d1d5db;
         }
 
@@ -230,26 +202,24 @@ def main():
             
         st.sidebar.success("Settings applied!")
     
-    
-    with st.sidebar.expander("API Keys", expanded=False):
-        openai_key = st.text_input("OpenAI API Key", type="password", value=Config.OPENAI_API_KEY or "")
-        groq_key = st.text_input("Groq API Key", type="password", value=Config.GROQ_API_KEY or "")
-        deepgram_key = st.text_input("Deepgram API Key", type="password", value=Config.DEEPGRAM_API_KEY or "")
-        elevenlabs_key = st.text_input("ElevenLabs API Key", type="password", value=Config.ELEVENLABS_API_KEY or "")
-        cartesia_key = st.text_input("Cartesia API Key", type="password", value=Config.CARTESIA_API_KEY or "")
-        
-        if st.button("Save API Keys"):
-            keys_dict = {
-                "OPENAI_API_KEY": openai_key,
-                "GROQ_API_KEY": groq_key,
-                "DEEPGRAM_API_KEY": deepgram_key,
-                "ELEVENLABS_API_KEY": elevenlabs_key,
-                "CARTESIA_API_KEY": cartesia_key
-            }
-            if save_api_keys(keys_dict):
-                st.success("API Keys saved to .env file!")
-            else:
-                st.error("Failed to save API keys.")
+
+    # Document Upload for RAG
+    with st.sidebar.expander("Document Upload (RAG)", expanded=False):
+        uploaded_files = st.file_uploader("Upload PDF documents", type=["pdf"], accept_multiple_files=True)
+        if uploaded_files:
+            if st.button("Process PDFs"):
+                with st.spinner("Processing PDFs..."):
+                    try:
+                        import requests
+                        files_payload = [("files", (f.name, f.getvalue(), "application/pdf")) for f in uploaded_files]
+                        res = requests.post("http://localhost:8000/upload", files=files_payload)
+                        if res.status_code == 200:
+                            data = res.json()
+                            st.success(f"Successfully processed {data['documents_processed']} PDFs into {data['chunks']} chunks globally via FastAPI Database!")
+                        else:
+                            st.error(f"Error from FastAPI backend: {res.text}")
+                    except Exception as e:
+                        st.error(f"Error processing PDFs: {str(e)}")
 
     # Service Status
     with st.sidebar.expander("Service Status", expanded=False):
@@ -375,12 +345,40 @@ def process_user_input(user_input, chat_container):
     # Generate response with a spinner to show loading
     with st.spinner("Thinking..."):
         try:
+            import requests
+            total_start = time.time()
             
-            response_api_key = get_response_api_key()
+            payload = {
+                "query": user_input,
+                "chat_history": st.session_state.chat_history
+            }
             
-            
-            response_text = generate_response(Config.RESPONSE_MODEL, response_api_key, st.session_state.chat_history, Config.LOCAL_MODEL_PATH)
-            
+            try:
+                res = requests.post("http://localhost:8000/query", json=payload)
+                
+                if res.status_code == 200:
+                    data = res.json()
+                    response_text = data["answer"]
+                    sources = data.get("sources", [])
+                    
+                    citations = ""
+                    if sources:
+                        citations = "\n\n**Sources:**\n"
+                        for s in sources:
+                            citations += f"- Document: {s['document_name']} (Page {s['page_number']}), Chunk {s['chunk_id']}\n"
+                            
+                    total_time = time.time() - total_start
+                    eval_metrics = f"\n\n*⏱ Evaluation: Total Remote Backend Latency ({total_time:.2f}s)*"
+                    
+                    response_text += citations
+                    response_text += eval_metrics
+                else:
+                    response_text = f"Error from backend API: {res.text}"
+                    logging.error(f"Backend Request Failed: {res.text}")
+                    
+            except Exception as e:
+                response_text = f"Connection Error: {e}. Ensure FastAPI backend is running on port 8000."
+                logging.error(f"Connection Error: {e}")
             
             st.session_state.messages.append({"role": "assistant", "content": response_text})
             with chat_container:
