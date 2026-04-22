@@ -13,7 +13,7 @@ RUN pip install --no-cache-dir fastapi uvicorn python-multipart pydantic PyPDF2
 COPY . .
 
 # Expose port for FastAPI
-EXPOSE 8000
+EXPOSE 8080
 
 # Run FastAPI using uvicorn
-CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8080"]

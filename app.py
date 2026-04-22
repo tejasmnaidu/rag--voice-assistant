@@ -212,7 +212,7 @@ def main():
                     try:
                         import requests
                         files_payload = [("files", (f.name, f.getvalue(), "application/pdf")) for f in uploaded_files]
-                        res = requests.post("http://localhost:8000/upload", files=files_payload)
+                        res = requests.post("http://localhost:8080/upload", files=files_payload)
                         if res.status_code == 200:
                             data = res.json()
                             st.success(f"Successfully processed {data['documents_processed']} PDFs into {data['chunks']} chunks globally via FastAPI Database!")
@@ -354,7 +354,7 @@ def process_user_input(user_input, chat_container):
             }
             
             try:
-                res = requests.post("http://localhost:8000/query", json=payload)
+                res = requests.post("http://localhost:8080/query", json=payload)
                 
                 if res.status_code == 200:
                     data = res.json()
@@ -377,7 +377,7 @@ def process_user_input(user_input, chat_container):
                     logging.error(f"Backend Request Failed: {res.text}")
                     
             except Exception as e:
-                response_text = f"Connection Error: {e}. Ensure FastAPI backend is running on port 8000."
+                response_text = f"Connection Error: {e}. Ensure FastAPI backend is running on port 8080."
                 logging.error(f"Connection Error: {e}")
             
             st.session_state.messages.append({"role": "assistant", "content": response_text})
