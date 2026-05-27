@@ -2,6 +2,7 @@
 
 import streamlit as st
 import time
+import streamlit.components.v1 as components
 import os
 import logging
 import threading
@@ -37,8 +38,10 @@ def autoplay_audio(file_path):
 
 # Function for recording state
 def start_recording():
+    st.session_state.status = "Listening..."
     with st.spinner("Recording..."):
         record_audio(Config.INPUT_AUDIO)
+    st.session_state.status = "Processing..."
     return True
 
 
@@ -115,6 +118,11 @@ def main():
             border: 1px solid #374151 !important;
             border-radius: 8px;
         }
+        /* Mobile responsiveness */
+        @media (max-width: 600px) {
+            .block-container { padding: 1rem; }
+            .stChatMessage { font-size: 0.95rem; }
+        }
         </style>
     """, unsafe_allow_html=True)
 
@@ -125,6 +133,11 @@ def main():
 
     
     st.sidebar.title("Settings")
+    # Theme toggle
+    if 'theme' not in st.session_state:
+        st.session_state.theme = 'dark'
+    theme_choice = st.sidebar.radio("Theme", ['dark', 'light'], index=0 if st.session_state.theme=='dark' else 1)
+    st.session_state.theme = theme_choice
     
     
     tts_options = ["openai", "elevenlabs", "deepgram", "melotts", "cartesia", "local"]
@@ -253,13 +266,16 @@ def main():
 
     
     # Metrics display row
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns([1,1,1,1])
     with col1:
         st.metric(label="Transcription", value=Config.TRANSCRIPTION_MODEL)
     with col2:
         st.metric(label="Response", value=Config.RESPONSE_MODEL)
     with col3:
         st.metric(label="TTS", value=Config.TTS_MODEL)
+    with col4:
+        status = st.session_state.get('status', 'Idle')
+        st.metric(label="Status", value=status)
 
     
     # Stop speaking button
@@ -299,33 +315,88 @@ def main():
     with col1:
         if st.button("🎤 Record", key="record_button", use_container_width=True):
             recording_complete = start_recording()
-            
             if recording_complete:
                 try:
-                    
                     transcription_api_key = get_transcription_api_key()
-                    
-                    
+                    t1 = time.time()
                     with st.spinner("Transcribing audio..."):
                         user_input = transcribe_audio(Config.TRANSCRIPTION_MODEL, transcription_api_key, Config.INPUT_AUDIO, Config.LOCAL_MODEL_PATH)
-                    
+                    st.session_state.metrics = st.session_state.get('metrics', {})
+                    st.session_state.metrics['transcription_time'] = time.time() - t1
                     if not user_input:
                         st.error("No speech detected. Please try again.")
                     else:
-                        
                         process_user_input(user_input, chat_container)
-                        
                 except Exception as e:
                     st.error(f"An error occurred: {str(e)}")
                     logging.error(f"An error occurred: {e}")
+
+        # Browser-side waveform demo (visual only)
+        components.html('''
+        <div style="display:flex;flex-direction:column;align-items:center;">
+                <canvas id="wave" width="300" height="60" style="width:100%;max-width:300px;border-radius:6px;background:#0b1220;display:block;"></canvas>
+          <div style="font-size:12px;color:#9ca3af;margin-top:6px;">Browser mic waveform (visual only)</div>
+        </div>
+        <script>
+        const canvas = document.getElementById('wave');
+                const ctx = canvas.getContext('2d');
+                const DPR = window.devicePixelRatio || 1;
+                function resizeCanvas(){
+                    // set canvas internal size for crisp rendering
+                    const w = canvas.clientWidth;
+                    const h = 60;
+                    canvas.width = Math.max(1, Math.floor(w * DPR));
+                    canvas.height = Math.max(1, Math.floor(h * DPR));
+                    canvas.style.height = h + 'px';
+                    ctx.setTransform(1,0,0,1,0,0);
+                    ctx.scale(DPR, DPR);
+                }
+                resizeCanvas();
+                window.addEventListener('resize', resizeCanvas);
+
+                navigator.mediaDevices.getUserMedia({audio:true}).then(stream=>{
+                    const audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+                    const source = audioCtx.createMediaStreamSource(stream);
+                    const analyser = audioCtx.createAnalyser();
+                    analyser.fftSize = 256;
+                    source.connect(analyser);
+                    const data = new Uint8Array(analyser.frequencyBinCount);
+                    function draw(){
+                        requestAnimationFrame(draw);
+                        analyser.getByteTimeDomainData(data);
+                        const W = canvas.width / DPR;
+                        const H = canvas.height / DPR;
+                        ctx.fillStyle = '#0b1220'; ctx.fillRect(0,0,W,H);
+                        ctx.lineWidth = 2; ctx.strokeStyle = '#34d399'; ctx.beginPath();
+                        const sliceWidth = W / data.length;
+                        let x = 0;
+                        for(let i=0;i<data.length;i++){
+                            const v = data[i]/128.0;
+                            const y = v*H/2;
+                            if(i===0) ctx.moveTo(x,y);
+                            else ctx.lineTo(x,y);
+                            x+=sliceWidth;
+                        }
+                        ctx.stroke();
+                    }
+                    draw();
+                }).catch(e=>{console.log('mic denied',e)});
+        </script>
+        ''', height=140)
     
     
+    # Voice selection in main UI (mirrors sidebar)
+    voice_cols = st.columns([1,3])
+    with voice_cols[0]:
+        tts_voice_main = st.selectbox("Voice", ["default", "nova", "alloy", "echo", "fable", "onyx", "shimmer"], index=0)
+
     user_input = st.chat_input("Or type your message here...")
     if user_input:
         process_user_input(user_input, chat_container)
 
 def process_user_input(user_input, chat_container):
     
+    st.session_state.status = 'Thinking...'
     st.session_state.messages.append({"role": "user", "content": user_input})
     with chat_container:
         with st.chat_message("user"):
@@ -342,7 +413,7 @@ def process_user_input(user_input, chat_container):
         st.session_state.chat_history.append({"role": "assistant", "content": "Goodbye! It was nice chatting with you."})
         return
     
-    # Generate response with a spinner to show loading
+    # Generate response with a spinner to show loading and collect latency metrics
     with st.spinner("Thinking..."):
         try:
             import requests
@@ -368,10 +439,9 @@ def process_user_input(user_input, chat_container):
                             citations += f"- Document: {s['document_name']} (Page {s['page_number']}), Chunk {s['chunk_id']}\n"
                             
                     total_time = time.time() - total_start
-                    eval_metrics = f"\n\n*⏱ Evaluation: Total Remote Backend Latency ({total_time:.2f}s)*"
-                    
+                    st.session_state.metrics = st.session_state.get('metrics', {})
+                    st.session_state.metrics['backend_time'] = total_time
                     response_text += citations
-                    response_text += eval_metrics
                 else:
                     response_text = f"Error from backend API: {res.text}"
                     logging.error(f"Backend Request Failed: {res.text}")
@@ -380,13 +450,24 @@ def process_user_input(user_input, chat_container):
                 response_text = f"Connection Error: {e}. Ensure FastAPI backend is running on port 8080."
                 logging.error(f"Connection Error: {e}")
             
+            # Stream / typing animation for assistant reply
             st.session_state.messages.append({"role": "assistant", "content": response_text})
             with chat_container:
                 with st.chat_message("assistant"):
-                    st.write(response_text)
+                    placeholder = st.empty()
+                    # reveal response word-by-word for typing effect
+                    words = response_text.split()
+                    displayed = ""
+                    for w in words:
+                        displayed += (" " if displayed else "") + w
+                        placeholder.markdown(displayed)
+                        time.sleep(0.03)
+                    # ensure final text
+                    placeholder.markdown(response_text)
             
             
             st.session_state.chat_history.append({"role": "assistant", "content": response_text})
+            st.session_state.status = 'Idle'
             
             
             if Config.TTS_MODEL in ['openai', 'elevenlabs', 'melotts', 'cartesia']:
@@ -404,6 +485,20 @@ def process_user_input(user_input, chat_container):
                 
                 if Config.TTS_MODEL != "cartesia":
                     autoplay_audio(output_file)
+                    # record tts time metric
+                    st.session_state.metrics['tts_generated'] = True
+            # show latency metrics if available
+            if 'metrics' in st.session_state:
+                m = st.session_state.metrics
+                with st.container():
+                    cols = st.columns(len(m))
+                    i = 0
+                    for k,v in m.items():
+                        try:
+                            cols[i].metric(label=k.replace('_',' ').title(), value=f"{v:.2f}s")
+                        except Exception:
+                            cols[i].metric(label=k.replace('_',' ').title(), value=str(v))
+                        i += 1
                     
         except Exception as e:
             st.error(f"An error occurred: {str(e)}")
