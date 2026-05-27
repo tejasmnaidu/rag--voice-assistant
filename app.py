@@ -321,8 +321,6 @@ def main():
                     t1 = time.time()
                     with st.spinner("Transcribing audio..."):
                         user_input = transcribe_audio(Config.TRANSCRIPTION_MODEL, transcription_api_key, Config.INPUT_AUDIO, Config.LOCAL_MODEL_PATH)
-                    st.session_state.metrics = st.session_state.get('metrics', {})
-                    st.session_state.metrics['transcription_time'] = time.time() - t1
                     if not user_input:
                         st.error("No speech detected. Please try again.")
                     else:
@@ -439,8 +437,6 @@ def process_user_input(user_input, chat_container):
                             citations += f"- Document: {s['document_name']} (Page {s['page_number']}), Chunk {s['chunk_id']}\n"
                             
                     total_time = time.time() - total_start
-                    st.session_state.metrics = st.session_state.get('metrics', {})
-                    st.session_state.metrics['backend_time'] = total_time
                     response_text += citations
                 else:
                     response_text = f"Error from backend API: {res.text}"
@@ -485,20 +481,6 @@ def process_user_input(user_input, chat_container):
                 
                 if Config.TTS_MODEL != "cartesia":
                     autoplay_audio(output_file)
-                    # record tts time metric
-                    st.session_state.metrics['tts_generated'] = True
-            # show latency metrics if available
-            if 'metrics' in st.session_state:
-                m = st.session_state.metrics
-                with st.container():
-                    cols = st.columns(len(m))
-                    i = 0
-                    for k,v in m.items():
-                        try:
-                            cols[i].metric(label=k.replace('_',' ').title(), value=f"{v:.2f}s")
-                        except Exception:
-                            cols[i].metric(label=k.replace('_',' ').title(), value=str(v))
-                        i += 1
                     
         except Exception as e:
             st.error(f"An error occurred: {str(e)}")
