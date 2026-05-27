@@ -119,7 +119,7 @@ def query_rag(req: QueryModel):
         
         # Simple rule-based learning: intercept commands asking to remember
         is_memory_command = False
-        memory_triggers = ["remember ", "remember that ", "add to todo", "add to my to-do", "add to my to do", "note this", "todo:"]
+        memory_triggers = ["remember ", "remember that ", "add to todo", "add to my to-do", "add to my to do", "note this", "todo:", "schedule:", "schedule ", "appointment ", "remind me ", "new reminder"]
         for trigger in memory_triggers:
             if trigger in user_input_lower:
                 is_memory_command = True
@@ -175,7 +175,7 @@ def query_rag(req: QueryModel):
             with open("memory.txt", "r", encoding="utf-8") as f:
                 memory_db = f.read().strip()
             if memory_db:
-                assistant_memory = f"\n\nHere are the user's saved notes, to-dos, and permanent memory across sessions. Always keep these in mind if applicable:\n{memory_db}"
+                assistant_memory = f"\n\nHere are the user's saved notes, schedules, appointments, and to-dos across sessions:\n{memory_db}\n\nWhen the user asks for their to-do list, schedule, appointments, or reminders, read them from the context above and present them in a clearly formatted list."
         
         # Hydrate chat history appropriately
         if req.chat_history:
