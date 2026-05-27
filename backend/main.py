@@ -177,14 +177,22 @@ def query_rag(req: QueryModel):
             if memory_db:
                 assistant_memory = f"\n\nHere are the user's saved notes, schedules, appointments, and to-dos across sessions:\n{memory_db}\n\nWhen the user asks for their to-do list, schedule, appointments, or reminders, read them from the context above and present them in a clearly formatted list."
         
-        # Hydrate chat history appropriately
+        # Hydrate chat history appropriately with a permissive-but-safe system prompt
+        system_prompt_base = (
+            "You are Spark, a knowledgeable and helpful personal assistant. "
+            "Answer user questions thoroughly and directly, prioritizing correctness, useful examples, and clear next steps. "
+            "Ask concise clarifying questions when the user's intent is ambiguous. "
+            "If a request is illegal, unsafe, or violates policy, refuse briefly and offer a safe, helpful alternative. "
+            "Keep responses concise unless the user asks for more detail."
+        )
+
         if req.chat_history:
             chat_history = req.chat_history
             # Ensure system prompt has memory dynamically bound to it via iteration
             if chat_history and chat_history[0].get("role") == "system":
-                chat_history[0]["content"] = f"You are a helpful personal assistant.{assistant_memory}"
+                chat_history[0]["content"] = system_prompt_base + assistant_memory
         else:
-            chat_history = [{"role": "system", "content": f"You are a helpful personal assistant.{assistant_memory}"}]
+            chat_history = [{"role": "system", "content": system_prompt_base + assistant_memory}]
             
         # Safely insert the newly augmented prompt without modifying the original user log sent from UI
         modified_history = chat_history.copy()
