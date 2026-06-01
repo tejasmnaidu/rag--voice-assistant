@@ -12,6 +12,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 from voice_assistant.rag.vector_store import VectorStore
 from voice_assistant.rag.retriever import init_retriever, retrieve
 from voice_assistant.response_generation import generate_response
+from voice_assistant.citation_manager import init_citation_manager, get_citation_manager
 from voice_assistant.api_key_manager import get_response_api_key
 from voice_assistant.config import Config
 
@@ -26,6 +27,12 @@ class QueryModel(BaseModel):
 @app.on_event("startup")
 def startup_event():
     global vector_store
+    
+    # Initialize citation manager
+    init_citation_manager(
+        top_k=Config.TOP_CITATIONS_TO_DISPLAY,
+        min_roi_threshold=Config.MIN_ROI_THRESHOLD
+    )
     
     if os.path.exists("vector_store.faiss") and os.path.exists("vector_store_chunks.pkl"):
         logging.info("Persistent DB found! Booting FAISS Index from disk into RAM...")
@@ -112,6 +119,8 @@ def query_rag(req: QueryModel):
     try:
         user_input = req.query
         response_api_key = get_response_api_key()
+        citation_manager = get_citation_manager()
+        citation_manager.reset()
         
         # 0. Personal Assistant Memory Intercept (To-Do list & Facts)
         memory_file_path = "memory.txt"
@@ -135,12 +144,17 @@ def query_rag(req: QueryModel):
             # LLM-Based Query Rewriting for higher retrieval semantic density
             rewrite_start = time.time()
             rewrite_prompt = f"Rewrite this query into a highly descriptive search query optimized for semantic document retrieval: {user_input}"
-            rewritten_query = generate_response(
+            rewritten_query_result = generate_response(
                 Config.RESPONSE_MODEL, 
                 response_api_key, 
                 [{"role": "user", "content": rewrite_prompt}], 
                 Config.LOCAL_MODEL_PATH
-            ).strip()
+            )
+            # Handle tuple return from new generate_response signature
+            if isinstance(rewritten_query_result, tuple):
+                rewritten_query = rewritten_query_result[0].strip()
+            else:
+                rewritten_query = rewritten_query_result.strip()
             rewrite_time = time.time() - rewrite_start
             
             logging.info(f"Query Rewrite: '{user_input}' -> '{rewritten_query}' (Time: {rewrite_time:.2f}s)")
@@ -148,6 +162,10 @@ def query_rag(req: QueryModel):
             retrieval_start = time.time()
             relevant_results = retrieve(rewritten_query)
             retrieval_time = time.time() - retrieval_start
+            
+            # Track retrieved sources for citation management
+            if Config.ENABLE_SOURCE_CITATIONS and relevant_results:
+                citation_manager.add_retrieved_sources(relevant_results)
             
             logging.info(f"Retriever: Extracted {len(relevant_results)} relevant chunks from Vector DB (Time: {retrieval_time:.2f}s)")
         
@@ -161,7 +179,8 @@ def query_rag(req: QueryModel):
                     "chunk": res["chunk"],
                     "document_name": meta.get("source", "Unknown Document"),
                     "page_number": meta.get("page", "?"),
-                    "chunk_id": meta.get("chunk_id", res['index'])
+                    "chunk_id": meta.get("chunk_id", res['index']),
+                    "relevance_score": res.get("score", 0.0)
                 })
         
         if context:
@@ -202,7 +221,22 @@ def query_rag(req: QueryModel):
             modified_history.append({"role": "user", "content": query_for_llm})
             
         gen_start = time.time()
-        response_text = generate_response(Config.RESPONSE_MODEL, response_api_key, modified_history, Config.LOCAL_MODEL_PATH)
+        gen_result = generate_response(
+            Config.RESPONSE_MODEL, 
+            response_api_key, 
+            modified_history, 
+            Config.LOCAL_MODEL_PATH,
+            retrieved_docs=relevant_results if Config.ENABLE_SOURCE_CITATIONS else None,
+            include_citations=Config.ENABLE_SOURCE_CITATIONS
+        )
+        
+        # Handle tuple return from new generate_response signature
+        if isinstance(gen_result, tuple):
+            response_text, citations_info = gen_result
+        else:
+            response_text = gen_result
+            citations_info = {"total_sources": 0, "top_citations": []}
+        
         gen_time = time.time() - gen_start
         
         total_time = time.time() - total_start
@@ -210,7 +244,14 @@ def query_rag(req: QueryModel):
         
         return {
             "answer": response_text,
-            "sources": sources
+            "sources": sources,
+            "citations": citations_info.get("top_citations", []),
+            "citation_summary": {
+                "total_sources_available": citations_info.get("total_sources", 0),
+                "top_citations_count": len(citations_info.get("top_citations", [])),
+                "average_relevance": round(citations_info.get("average_relevance", 0.0), 4)
+            }
         }
     except Exception as e:
+        logging.error(f"Error in query_rag: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))

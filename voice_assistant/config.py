@@ -35,6 +35,13 @@ class Config:
     LOCAL_MODEL_PATH = os.getenv("LOCAL_MODEL_PATH")
     CARTESIA_API_KEY = os.getenv("CARTESIA_API_KEY")
 
+    # Citation and Source Tracking Settings
+    ENABLE_SOURCE_CITATIONS = True  # Enable source citations in responses
+    TOP_CITATIONS_TO_DISPLAY = 5  # Number of top citations to show
+    MIN_ROI_THRESHOLD = 0.1  # Minimum ROI score to include a citation
+    INCLUDE_CITATION_SCORES = True  # Include relevance and ROI scores in display
+    MAX_SOURCE_PREVIEW_LENGTH = 300  # Max characters for source preview
+
     # for serving the MeloTTS model
     TTS_PORT_LOCAL = 5150
 

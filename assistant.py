@@ -40,7 +40,23 @@ def main():
             st.write('You said:', user_input)
             response_api_key = get_response_api_key()
             chat_history = [{"role": "user", "content": user_input}]
-            response_text = generate_response(Config.RESPONSE_MODEL, response_api_key, chat_history, Config.LOCAL_MODEL_PATH)
+            
+            # Use updated generate_response with citation support
+            result = generate_response(
+                Config.RESPONSE_MODEL, 
+                response_api_key, 
+                chat_history, 
+                Config.LOCAL_MODEL_PATH,
+                retrieved_docs=None,  # Can be added if RAG is enabled
+                include_citations=False  # Local assistant mode doesn't use RAG
+            )
+            
+            # Handle tuple return from new generate_response signature
+            if isinstance(result, tuple):
+                response_text, _ = result
+            else:
+                response_text = result
+                
             st.write('AI Response:', response_text)
 
             tts_api_key = get_tts_api_key()

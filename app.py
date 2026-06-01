@@ -429,15 +429,40 @@ def process_user_input(user_input, chat_container):
                     data = res.json()
                     response_text = data["answer"]
                     sources = data.get("sources", [])
+                    citations = data.get("citations", [])
+                    citation_summary = data.get("citation_summary", {})
                     
-                    citations = ""
-                    if sources:
-                        citations = "\n\n**Sources:**\n"
-                        for s in sources:
-                            citations += f"- Document: {s['document_name']} (Page {s['page_number']}), Chunk {s['chunk_id']}\n"
+                    # Format citations with ROI information
+                    citations_display = ""
+                    if Config.ENABLE_SOURCE_CITATIONS and citations:
+                        citations_display = "\n\n---\n## 📚 Source Citations (Ranked by ROI)\n\n"
+                        for idx, citation in enumerate(citations, 1):
+                            source_info = citation.get("source", f"Source {idx}")
+                            roi_score = citation.get("roi_score", 0)
+                            relevance_score = citation.get("relevance_score", 0)
+                            mention_count = citation.get("mention_count", 0)
                             
+                            if Config.INCLUDE_CITATION_SCORES:
+                                score_info = f" | Relevance: {relevance_score} | ROI: {roi_score} | Mentions: {mention_count}"
+                            else:
+                                score_info = ""
+                            
+                            citations_display += f"**[{idx}]** {source_info}{score_info}\n"
+                        
+                        if citation_summary.get("average_relevance"):
+                            citations_display += f"\n*Avg. Relevance Score: {citation_summary['average_relevance']}*"
+                    
+                    # Also include traditional sources display
+                    sources_display = ""
+                    if sources:
+                        sources_display = "\n\n---\n## 📖 Referenced Documents\n\n"
+                        for s in sources:
+                            sources_display += f"- **{s['document_name']}** (Page {s['page_number']}), Chunk {s['chunk_id']}\n"
+                            if "relevance_score" in s:
+                                sources_display += f"  - Relevance Score: {s['relevance_score']}\n"
+                    
                     total_time = time.time() - total_start
-                    response_text += citations
+                    response_text += citations_display + sources_display
                 else:
                     response_text = f"Error from backend API: {res.text}"
                     logging.error(f"Backend Request Failed: {res.text}")
